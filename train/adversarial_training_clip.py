@@ -165,7 +165,7 @@ def main(args):
     with torch.no_grad():
         embedding_text_labels_norm = []
         if args.dataset=="tiny-imagenet":
-            embedding_text_labels_norm.append(model_orig.encode_text(el.to(main_device), normalize=True).detach().cpu())
+            embedding_text_labels_norm.append(model_orig.encode_text(text_tokens.to(main_device), normalize=True).detach().cpu())
         else:
             for el in (text_tokens[:500], text_tokens[500:]):
                 # we need to split the text tokens into two batches because otherwise we run out of memory
