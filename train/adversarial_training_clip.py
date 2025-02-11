@@ -25,6 +25,7 @@ from train.utils import init_wandb, AverageMeter
 from train.sam_data import SamData
 from open_flamingo.eval.models.utils import unwrap_model
 from train.utils import str2bool
+from tiny_imagenet_classes import TINY_IMAGENET_CLASSES
 
 import argparse
 
@@ -116,12 +117,12 @@ def main(args):
     # Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
 
     # get data
-    if args.dataset == 'imagenet':
+    if args.dataset == 'imagenet' or args.dataset == "tiny-imagenet":
         dataset = ImageNetDataset(
             root=args.imagenet_root + '/train',
             transform=preprocessor_without_normalize,
         )
-
+        print(dataset.__len__())
     elif args.dataset == 'segment_anything':
         dataset = SamData('/data/naman_deep_singh/datasets/newSAM', transform=preprocessor_without_normalize)
 
@@ -155,18 +156,24 @@ def main(args):
     else:
         raise ValueError(f'Unknown template: {args.template}')
     print(f'template: {template}')
-    texts = [template.format(c) for c in IMAGENET_1K_CLASS_ID_TO_LABEL.values()]
+    if dataset == "tiny-imagenet":
+        texts = [template.format(c) for c in TINY_IMAGENET_CLASSES.values()]
+    else:
+        texts = [template.format(c) for c in IMAGENET_1K_CLASS_ID_TO_LABEL.values()]
     text_tokens = open_clip.tokenize(texts)
     model_orig.to(main_device)
     with torch.no_grad():
         embedding_text_labels_norm = []
-        for el in (text_tokens[:500], text_tokens[500:]):
-            # we need to split the text tokens into two batches because otherwise we run out of memory
-            # note that we are accessing the model directly here, not the CustomModel wrapper
-            # thus its always normalizing the text embeddings
-            embedding_text_labels_norm.append(
-                model_orig.encode_text(el.to(main_device), normalize=True).detach().cpu()
-            )
+        if args.dataset=="tiny-imagenet":
+            embedding_text_labels_norm.append(model_orig.encode_text(el.to(main_device), normalize=True).detach().cpu())
+        else:
+            for el in (text_tokens[:500], text_tokens[500:]):
+                # we need to split the text tokens into two batches because otherwise we run out of memory
+                # note that we are accessing the model directly here, not the CustomModel wrapper
+                # thus its always normalizing the text embeddings
+                embedding_text_labels_norm.append(
+                    model_orig.encode_text(el.to(main_device), normalize=True).detach().cpu()
+                )
         embedding_text_labels_norm = torch.cat(embedding_text_labels_norm).T.to(main_device)
         assert torch.allclose(
             F.normalize(embedding_text_labels_norm, dim=0),
@@ -272,6 +279,19 @@ class ComputeLossWrapper:
             embedding_orig=self.embedding_orig, logit_scale=self.logit_scale,
             embedding_text_labels_norm=self.embedding_text_labels_norm, reduction=self.reduction
             )
+    
+## Make ComputeLossWrapper a closure for better optimization in PyTorch and make it fast using torch.compile 
+@torch.compile
+def compute_loss_wrapper(embedding_orig, embedding_text_labels_norm, reduction='mean', loss=None,
+                 logit_scale=100.):
+    def inner_func(embedding, targets):
+        return compute_loss(
+                loss_str=loss, embedding=embedding, targets=targets,
+                embedding_orig=embedding_orig, logit_scale=logit_scale,
+                embedding_text_labels_norm=embedding_text_labels_norm, reduction=reduction
+                )
+    return inner_func
+
 
 def train_one_epoch(
         step_total, model, model_orig, dataloader, optimizer, scheduler, normalize,
@@ -297,7 +317,7 @@ def train_one_epoch(
             embedding_orig = model_orig(vision=data, output_normalize=args.output_normalize)
 
         # loss for the attack
-        loss_inner_wrapper = ComputeLossWrapper(
+        loss_inner_wrapper = compute_loss_wrapper(
             embedding_orig, embedding_text_labels_norm,
             reduction='none' if args.attack == 'apgd' else 'mean', loss=args.inner_loss,
             logit_scale=100.
