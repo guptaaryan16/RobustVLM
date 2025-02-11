@@ -2,7 +2,7 @@ import sys
 
 from train.datasets import COCOFlickrDataset, ImageNetDataset
 from CLIP_eval.eval_utils import load_clip_model
-from tiny_imagenet_classes import TINY_IMAGENET_CLASSES
+from train.tiny_imagenet_classes import TINY_IMAGENET_CLASSES
 
 sys.path.append("open_flamingo")
 import os
