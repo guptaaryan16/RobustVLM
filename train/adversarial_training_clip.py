@@ -2,6 +2,7 @@ import sys
 
 from train.datasets import COCOFlickrDataset, ImageNetDataset
 from CLIP_eval.eval_utils import load_clip_model
+from tiny_imagenet_classes import TINY_IMAGENET_CLASSES
 
 sys.path.append("open_flamingo")
 import os
@@ -25,7 +26,6 @@ from train.utils import init_wandb, AverageMeter
 from train.sam_data import SamData
 from open_flamingo.eval.models.utils import unwrap_model
 from train.utils import str2bool
-from tiny_imagenet_classes import TINY_IMAGENET_CLASSES
 
 import argparse
 
